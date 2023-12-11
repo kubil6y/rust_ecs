@@ -31,7 +31,7 @@ pub struct Logger {
 impl Logger {
     pub fn new() -> Self {
         Self {
-            level: LogLevel::Debug,
+            level: LogLevel::Info,
             log_entries: vec![],
         }
     }
@@ -73,7 +73,7 @@ impl Logger {
             LogLevel::Error => "ERROR:".red(),
         };
 
-        let timestamp = Utc::now().to_string();
+        let timestamp = Utc::now().timestamp().to_string();
         let message = format!("{} [{}]: {}", prefix, timestamp, message);
         let entry = LogEntry::new(level, &message);
         self.log_entries.push(entry);

@@ -1,16 +1,13 @@
+use crate::game::{WINDOW_WIDTH, Game};
+use anyhow::Result;
+
+mod game;
 mod logger;
 
-use crate::logger::Logger;
-fn main() {
-    let mut logger = Logger::new();
-    logger.set_log_level(logger::LogLevel::Info);
-    logger.log("this is an info message");
-    logger.warning("this is a warning message");
-    logger.error("this is a error message");
+fn main() -> Result<()> {
+    println!("{}", WINDOW_WIDTH);
+    let mut game = Game::new("Demo")?;
+    game.run()?;
 
-    let entires = logger.get_log_entires();
-    println!("this is log messages...");
-    entires.iter().for_each(|x| {
-        println!("{}", x.message);
-    });
+    Ok(())
 }

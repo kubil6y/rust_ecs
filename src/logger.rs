@@ -2,8 +2,8 @@ use chrono::Utc;
 use colored::Colorize;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
 pub enum LogLevel {
+    Debug,
     Info,
     Warning,
     Error,
@@ -31,7 +31,7 @@ pub struct Logger {
 impl Logger {
     pub fn new() -> Self {
         Self {
-            level: LogLevel::Info,
+            level: LogLevel::Debug,
             log_entries: vec![],
         }
     }
@@ -43,6 +43,11 @@ impl Logger {
     pub fn set_log_level(&mut self, level: LogLevel) {
         self.level = level;
     }
+
+    pub fn debug(&mut self, message: &str) {
+        self.log_entry(LogLevel::Debug, message);
+    }
+
 
     pub fn log(&mut self, message: &str) {
         self.log_entry(LogLevel::Info, message);
@@ -62,6 +67,7 @@ impl Logger {
         }
 
         let prefix = match level {
+            LogLevel::Debug => "DEBUG:".green(),
             LogLevel::Info => "INFO:".blue(),
             LogLevel::Warning => "WARNING:".yellow(),
             LogLevel::Error => "ERROR:".red(),

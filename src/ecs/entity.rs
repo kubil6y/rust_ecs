@@ -1,6 +1,5 @@
 use std::{
     any::{Any, TypeId},
-    borrow::BorrowMut,
     cell::{Ref, RefCell, RefMut},
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
@@ -66,6 +65,9 @@ impl Registry {
     }
 
     pub fn create_entity(&mut self) -> Entity {
+        if self.components.len() == 0 {
+            panic!("Register components first and then create entities!");
+        }
         if self.available_entity_spots.is_empty() {
             let entity = Entity::new(self.num_entities);
             self.num_entities += 1;
@@ -90,6 +92,7 @@ impl Registry {
     }
 
     // Component management
+    /// NOTE: If you add the same component again it will override 
     pub fn add_component(&mut self, entity: Entity, data: impl Any) -> Result<()> {
         let entity_id = entity.0;
         let component_type_id = data.type_id();
@@ -176,13 +179,14 @@ impl Registry {
         if !self.has_component::<T>(entity)? {
             return Err(CustomErrors::ComponentDoesNotExist.into());
         }
-
         let components = self.extract_components::<T>()?;
         let borrowed_component = components[entity.0]
             .as_ref()
             .ok_or(CustomErrors::ComponentDoesNotExist)?
             .borrow_mut();
-        todo!();
+        Ok(RefMut::map(borrowed_component, |any| {
+            any.downcast_mut::<T>().unwrap()
+        }))
     }
 
     pub fn get_num_entities(&self) -> usize {
@@ -209,6 +213,26 @@ mod tests {
     struct Health(i32);
     #[derive(Debug)]
     struct Size(i32);
+
+    #[test]
+    fn getting_mut_components_from_entities() -> Result<()> {
+        let mut registry = Registry::default();
+        registry.register_component::<Health>()?;
+        registry.register_component::<Size>()?;
+        let entity1 = registry.create_entity();
+        registry.add_component(entity1, Health(50))?;
+        registry.add_component(entity1, Size(100))?;
+
+        let mut entity1_health = registry.get_component_mut::<Health>(entity1)?;
+        entity1_health.0 = 30;
+        assert_eq!(entity1_health.0, 30);
+
+        let mut entity1_size = registry.get_component_mut::<Size>(entity1)?;
+        entity1_size.0 = 5;
+        assert_eq!(entity1_size.0, 5);
+
+        Ok(())
+    }
 
     #[test]
     fn getting_components_from_entities() -> Result<()> {
@@ -346,8 +370,9 @@ mod tests {
     }
 
     #[test]
-    fn create_entities() {
+    fn create_entities() -> Result<()> {
         let mut registry = Registry::default();
+        registry.register_component::<f32>()?;
         let entity1 = registry.create_entity();
         let entity2 = registry.create_entity();
 
@@ -366,6 +391,7 @@ mod tests {
                 assert_eq!(el.is_none(), true);
             }
         }
+        Ok(())
     }
 
     #[test]

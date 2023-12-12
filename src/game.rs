@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     rc::Rc,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime}, borrow::BorrowMut,
 };
 
 use anyhow::{Error, Result};
@@ -41,7 +41,6 @@ impl Game {
 
         let canvas = window.into_canvas().build().map_err(Error::msg)?;
         let logger = Rc::new(RefCell::new(Logger::default()));
-        logger.borrow_mut().log("Game constructor called");
         let registry = Registry::new(Rc::clone(&logger));
 
         let game = Self {
@@ -57,6 +56,7 @@ impl Game {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        self.logger.as_ref().borrow_mut().log("Game run!");
         self.setup()?;
         while self.is_running {
             self.process_input()?;
@@ -119,15 +119,11 @@ impl Game {
     }
 
     pub fn update(&mut self) -> Result<()> {
-        // FIXME: This is terrible
-        // NOTE: It overflows sometimes
-        let wait_time = MILLISECS_PER_FRAME
-            .checked_sub(
-                SystemTime::now()
-                    .duration_since(self.prev_frame_time)?
-                    .as_millis(),
-            )
-            .unwrap_or(0);
+        let wait_time = MILLISECS_PER_FRAME.saturating_sub(
+            SystemTime::now()
+                .duration_since(self.prev_frame_time)?
+                .as_millis(),
+        );
 
         if wait_time > 0 && wait_time <= MILLISECS_PER_FRAME {
             std::thread::sleep(Duration::from_millis(wait_time as u64));

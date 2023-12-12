@@ -146,7 +146,7 @@ impl Registry {
             .get_entity_component_signature(entity)
             .ok_or(CustomErrors::EntityComponentMaskDoesNotExist)?;
 
-        return Ok(entity_mask & component_mask == component_mask);
+        Ok(entity_mask & component_mask == component_mask)
     }
 
     fn extract_components<T: Any>(&self) -> Result<&Vec<Option<Component>>> {

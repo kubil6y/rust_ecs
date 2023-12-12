@@ -68,16 +68,25 @@ impl Game {
     }
 
     pub fn setup(&mut self) -> Result<()> {
-        self.logger.borrow_mut().set_log_level(LogLevel::Debug);
+        self.logger
+            .as_ref()
+            .borrow_mut()
+            .set_log_level(LogLevel::Debug);
+
         self.prev_frame_time = SystemTime::now();
         self.load_level(1);
         self.is_running = true;
-        self.logger.borrow_mut().log("Game setup is called");
+
+        self.logger
+            .as_ref()
+            .borrow_mut()
+            .log("Game setup is called");
         Ok(())
     }
 
     pub fn load_level(&mut self, level: i32) {
         self.logger
+            .as_ref()
             .borrow_mut()
             .log(&format!("Game Level {} is loaded", level));
     }

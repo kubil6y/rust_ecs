@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum EcsErrors {
+pub enum CustomErrors {
     #[error(
         "Max component count has been reached. Try removing a component or increase MAXCOMPONENTS"
     )]

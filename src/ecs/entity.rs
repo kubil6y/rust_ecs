@@ -1,5 +1,6 @@
 use std::{
     any::{Any, TypeId},
+    borrow::BorrowMut,
     cell::{Ref, RefCell, RefMut},
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
@@ -9,10 +10,9 @@ use anyhow::Result;
 
 use crate::logger::Logger;
 
-use super::ecs_errors::EcsErrors;
+use super::ecs_errors::CustomErrors;
 
 pub type Component = Rc<RefCell<dyn Any>>;
-pub type Components = HashMap<TypeId, Vec<Option<Component>>>;
 
 pub const MAX_COMPONENTS: usize = 32;
 
@@ -51,7 +51,7 @@ impl Registry {
 
     pub fn register_component<T: Any + 'static>(&mut self) -> Result<()> {
         if self.components.len() >= MAX_COMPONENTS {
-            return Err(EcsErrors::MaxComponentReached.into());
+            return Err(CustomErrors::MaxComponentReached.into());
         }
 
         let type_id = TypeId::of::<T>();
@@ -79,6 +79,7 @@ impl Registry {
             self.entity_component_signatures.push(0);
 
             self.logger
+                .as_ref()
                 .borrow_mut()
                 .log(&format!("Entity created with id = {}", entity.0));
 
@@ -93,22 +94,21 @@ impl Registry {
         let entity_id = entity.0;
         let component_type_id = data.type_id();
 
-        let component_vec = match self.components.get_mut(&component_type_id) {
-            Some(component_vec) => component_vec,
-            None => return Err(EcsErrors::ComponentDoesNotExist.into()),
-        };
+        let component_vec = self
+            .components
+            .get_mut(&component_type_id)
+            .ok_or(CustomErrors::ComponentDoesNotExist)?;
 
         component_vec[entity_id] = Some(Rc::new(RefCell::new(data)));
 
-        let component_mask = match self.get_component_signature_by_id(component_type_id) {
-            Some(mask) => mask,
-            None => return Err(EcsErrors::ComponentMaskDoesNotExist.into()),
-        };
+        let component_mask = self
+            .get_component_signature_by_id(component_type_id)
+            .ok_or(CustomErrors::ComponentMaskDoesNotExist)?;
 
         if let Some(entity_mask) = self.entity_component_signatures.get_mut(entity_id) {
             *entity_mask |= component_mask;
         } else {
-            return Err(EcsErrors::EntityComponentMaskDoesNotExist.into());
+            return Err(CustomErrors::EntityComponentMaskDoesNotExist.into());
         }
 
         Ok(())
@@ -118,16 +118,16 @@ impl Registry {
         if self.has_component::<T>(entity)? {
             let component_mask = self
                 .get_component_signature_by_type::<T>()
-                .ok_or(EcsErrors::ComponentMaskDoesNotExist)?;
+                .ok_or(CustomErrors::ComponentMaskDoesNotExist)?;
 
             let entity_mask = self
                 .entity_component_signatures
                 .get_mut(entity.0)
-                .ok_or(EcsErrors::EntityComponentMaskDoesNotExist)?;
+                .ok_or(CustomErrors::EntityComponentMaskDoesNotExist)?;
 
             *entity_mask ^= component_mask;
 
-            self.logger.borrow_mut().log(&format!(
+            self.logger.as_ref().borrow_mut().log(&format!(
                 "Component id = {:?} was removed from entity id {}",
                 &TypeId::of::<T>(),
                 entity.0
@@ -140,20 +140,48 @@ impl Registry {
     pub fn has_component<T: Any>(&self, entity: Entity) -> Result<bool> {
         let component_mask = self
             .get_component_signature_by_type::<T>()
-            .ok_or(EcsErrors::ComponentMaskDoesNotExist)?;
+            .ok_or(CustomErrors::ComponentMaskDoesNotExist)?;
 
         let entity_mask = self
             .get_entity_component_signature(entity)
-            .ok_or(EcsErrors::EntityComponentMaskDoesNotExist)?;
+            .ok_or(CustomErrors::EntityComponentMaskDoesNotExist)?;
 
         return Ok(entity_mask & component_mask == component_mask);
     }
 
-    pub fn get_component_ref<T: Any>(&self, entity: Entity) -> Ref<T> {
-        todo!();
+    fn extract_components<T: Any>(&self) -> Result<&Vec<Option<Component>>> {
+        let type_id = TypeId::of::<T>();
+        let components = self
+            .components
+            .get(&type_id)
+            .ok_or(CustomErrors::ComponentDoesNotExist)?;
+        Ok(components)
     }
 
-    pub fn get_component_mut<T: Any>(&self, entity: Entity) -> RefMut<T> {
+    pub fn get_component<T: Any>(&self, entity: Entity) -> Result<Ref<T>> {
+        if !self.has_component::<T>(entity)? {
+            return Err(CustomErrors::ComponentDoesNotExist.into());
+        }
+        let components = self.extract_components::<T>()?;
+        let borrowed_component = components[entity.0]
+            .as_ref()
+            .ok_or(CustomErrors::ComponentDoesNotExist)?
+            .borrow();
+        Ok(Ref::map(borrowed_component, |any| {
+            any.downcast_ref::<T>().unwrap()
+        }))
+    }
+
+    pub fn get_component_mut<T: Any + 'static>(&self, entity: Entity) -> Result<RefMut<T>> {
+        if !self.has_component::<T>(entity)? {
+            return Err(CustomErrors::ComponentDoesNotExist.into());
+        }
+
+        let components = self.extract_components::<T>()?;
+        let borrowed_component = components[entity.0]
+            .as_ref()
+            .ok_or(CustomErrors::ComponentDoesNotExist)?
+            .borrow_mut();
         todo!();
     }
 
@@ -177,8 +205,32 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Debug)]
     struct Health(i32);
+    #[derive(Debug)]
     struct Size(i32);
+
+    #[test]
+    fn getting_components_from_entities() -> Result<()> {
+        let mut registry = Registry::default();
+        registry.register_component::<Health>()?;
+        registry.register_component::<Size>()?;
+        let entity1 = registry.create_entity();
+        let entity2 = registry.create_entity();
+        registry.add_component(entity1, Health(50))?;
+        registry.add_component(entity2, Health(100))?;
+        {
+            let entity1_health = registry.get_component::<Health>(entity1)?;
+            let entity2_health = registry.get_component::<Health>(entity2)?;
+            assert_eq!(entity1_health.0, 50);
+            assert_eq!(entity2_health.0, 100);
+        }
+        registry.remove_component::<Health>(entity1)?;
+        let wrapped_entity1_health = registry.get_component::<Health>(entity1);
+        assert_eq!(wrapped_entity1_health.is_err(), true);
+
+        Ok(())
+    }
 
     #[test]
     fn removing_components_from_entities() -> Result<()> {

@@ -1,4 +1,8 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::{Error, Result};
 use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::WindowCanvas, Sdl};
@@ -17,7 +21,7 @@ pub const MILLISECS_PER_FRAME: u128 = 1000 / FPS;
 pub struct Game {
     is_running: bool,
     prev_frame_time: SystemTime,
-    logger: Logger,
+    logger: Rc<RefCell<Logger>>,
     registry: Registry,
     sdl_context: Sdl,
     canvas: WindowCanvas,
@@ -36,9 +40,9 @@ impl Game {
             .map_err(Error::msg)?;
 
         let canvas = window.into_canvas().build().map_err(Error::msg)?;
-        let mut logger = Logger::default();
-        logger.log("Game constructor called");
-        let registry = Registry::default();
+        let logger = Rc::new(RefCell::new(Logger::default()));
+        logger.borrow_mut().log("Game constructor called");
+        let registry = Registry::new(Rc::clone(&logger));
 
         let game = Self {
             is_running: false,
@@ -64,17 +68,18 @@ impl Game {
     }
 
     pub fn setup(&mut self) -> Result<()> {
-        self.logger.set_log_level(LogLevel::Debug);
-        self.registry.some_logger(&mut self.logger);
+        self.logger.borrow_mut().set_log_level(LogLevel::Debug);
         self.prev_frame_time = SystemTime::now();
         self.load_level(1);
         self.is_running = true;
-        self.logger.log("Game setup is called");
+        self.logger.borrow_mut().log("Game setup is called");
         Ok(())
     }
 
     pub fn load_level(&mut self, level: i32) {
-        self.logger.log(&format!("Game Level {} is loaded", level));
+        self.logger
+            .borrow_mut()
+            .log(&format!("Game Level {} is loaded", level));
     }
 
     pub fn process_input(&mut self) -> Result<()> {

@@ -26,6 +26,7 @@ impl Entity {
 
 #[derive(Default)]
 pub struct Registry {
+    logger: Rc<RefCell<Logger>>,
     entity_count: u32,
     /// key => ComponentTypeId, value => Vec<Component>
     components: ComponentMap,
@@ -40,6 +41,13 @@ pub struct Registry {
 }
 
 impl Registry {
+    pub fn new(logger: Rc<RefCell<Logger>>) -> Self {
+        Self {
+            logger,
+            ..Default::default()
+        }
+    }
+
     pub fn register_component<T: Any + 'static>(&mut self) -> Result<()> {
         if self.components.len() >= MAX_COMPONENTS {
             return Err(EcsErrors::MaxComponentReached.into());
@@ -76,11 +84,14 @@ mod tests {
         let mut registry = Registry::default();
         registry.register_component::<Health>()?;
         registry.register_component::<Size>()?;
-
         assert_eq!(registry.components.len(), 2);
         assert_eq!(registry.component_signatures.len(), 2);
+        Ok(())
+    }
 
-        struct Type0;
+    #[test]
+    fn check_max_components() -> Result<()> {
+        let mut registry = Registry::default();
         struct Type1;
         struct Type2;
         struct Type3;
@@ -111,8 +122,9 @@ mod tests {
         struct Type28;
         struct Type29;
         struct Type30;
-
-        registry.register_component::<Type0>()?;
+        struct Type31;
+        struct Type32;
+        struct Type33;
         registry.register_component::<Type1>()?;
         registry.register_component::<Type2>()?;
         registry.register_component::<Type3>()?;
@@ -142,10 +154,11 @@ mod tests {
         registry.register_component::<Type27>()?;
         registry.register_component::<Type28>()?;
         registry.register_component::<Type29>()?;
-        let result = registry.register_component::<Type30>();
+        registry.register_component::<Type30>()?;
+        registry.register_component::<Type31>()?;
+        registry.register_component::<Type32>()?;
+        let result = registry.register_component::<Type33>();
         assert_eq!(result.is_err(), true);
-        //registry.register_component::<Type31>()?;
-
         Ok(())
     }
 }

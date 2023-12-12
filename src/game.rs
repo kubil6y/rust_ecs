@@ -3,7 +3,10 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Error, Result};
 use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::WindowCanvas, Sdl};
 
-use crate::logger::{LogLevel, Logger};
+use crate::{
+    ecs::entity::Registry,
+    logger::{LogLevel, Logger},
+};
 
 // TODO: map_width and height static mut is unsafe
 pub const WINDOW_WIDTH: u32 = 800;
@@ -15,7 +18,7 @@ pub struct Game {
     is_running: bool,
     prev_frame_time: SystemTime,
     logger: Logger,
-
+    registry: Registry,
     sdl_context: Sdl,
     canvas: WindowCanvas,
 }
@@ -33,13 +36,14 @@ impl Game {
             .map_err(Error::msg)?;
 
         let canvas = window.into_canvas().build().map_err(Error::msg)?;
-
-        let mut logger = Logger::new();
-        logger.log("Game is created");
+        let mut logger = Logger::default();
+        logger.log("Game constructor called");
+        let registry = Registry::default();
 
         let game = Self {
             is_running: false,
             prev_frame_time: SystemTime::now(),
+            registry,
             logger,
             canvas,
             sdl_context,
@@ -55,18 +59,17 @@ impl Game {
             self.update()?;
             self.render()?;
         }
+
         Ok(())
     }
 
-    // game level setup
     pub fn setup(&mut self) -> Result<()> {
         self.logger.set_log_level(LogLevel::Debug);
+        self.registry.some_logger(&mut self.logger);
         self.prev_frame_time = SystemTime::now();
         self.load_level(1);
-
         self.is_running = true;
         self.logger.log("Game setup is called");
-
         Ok(())
     }
 
@@ -102,6 +105,8 @@ impl Game {
     }
 
     pub fn update(&mut self) -> Result<()> {
+        // FIXME: This is terrible
+        // NOTE: It overflows sometimes
         let wait_time = MILLISECS_PER_FRAME
             .checked_sub(
                 SystemTime::now()
@@ -109,11 +114,6 @@ impl Game {
                     .as_millis(),
             )
             .unwrap_or(0);
-
-        //let wait_time = MILLISECS_PER_FRAME
-        //- (SystemTime::now()
-        //.duration_since(self.prev_frame_time)?
-        //.as_millis());
 
         if wait_time > 0 && wait_time <= MILLISECS_PER_FRAME {
             std::thread::sleep(Duration::from_millis(wait_time as u64));

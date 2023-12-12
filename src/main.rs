@@ -1,6 +1,7 @@
 use crate::game::Game;
 use anyhow::Result;
 
+mod ecs;
 mod game;
 mod logger;
 

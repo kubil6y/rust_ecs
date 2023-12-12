@@ -1,9 +1,10 @@
 use chrono::Utc;
 use colored::Colorize;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Debug,
+    #[default]
     Info,
     Warning,
     Error,
@@ -23,19 +24,13 @@ impl LogEntry {
     }
 }
 
+#[derive(Default)]
 pub struct Logger {
     level: LogLevel,
     log_entries: Vec<LogEntry>,
 }
 
 impl Logger {
-    pub fn new() -> Self {
-        Self {
-            level: LogLevel::Info,
-            log_entries: vec![],
-        }
-    }
-
     pub fn get_log_entires(&self) -> &Vec<LogEntry> {
         &self.log_entries
     }

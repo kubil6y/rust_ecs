@@ -12,4 +12,6 @@ pub enum EcsErrors {
     ComponentMaskDoesNotExist,
     #[error("Entity component mask does not exist")]
     EntityComponentMaskDoesNotExist,
+    #[error("System is not registered")]
+    SystemDoesNotExist,
 }

@@ -3,8 +3,8 @@ use colored::Colorize;
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
-    Debug,
     #[default]
+    Debug,
     Info,
     Warning,
     Error,

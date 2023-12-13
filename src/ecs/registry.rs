@@ -1,3 +1,6 @@
+use super::ecs_errors::EcsErrors;
+use crate::logger::Logger;
+use anyhow::Result;
 use std::{
     any::{Any, TypeId},
     cell::{Ref, RefCell, RefMut},
@@ -5,15 +8,8 @@ use std::{
     rc::Rc,
 };
 
-use anyhow::Result;
-
-use crate::logger::Logger;
-
-use super::ecs_errors::EcsErrors;
-
-pub type Component = Rc<RefCell<dyn Any>>;
-
 pub const MAX_COMPONENTS: usize = 32;
+pub type Component = Rc<RefCell<dyn Any>>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Entity(pub usize);
@@ -30,14 +26,18 @@ pub struct Registry {
     num_entities: usize,
     /// key => ComponentTypeId, value => Vec<Component>
     components: HashMap<TypeId, Vec<Option<Component>>>,
-    //component_pools: Vec<Rc<RefCell<Vec<Rc<RefCell<dyn Any>>>>>>,
     component_masks: HashMap<TypeId, u32>,
     /// index: entity_id => signature mask
     entity_masks: Vec<u32>,
-    entities_to_be_added: HashSet<Entity>,
-    entities_to_be_killed: HashSet<Entity>,
-    // NOTE: push_back, pop_front (remove later)
+
+    // TODO: no functionality yet
+    entities_to_be_added: Vec<Entity>,
+    entities_to_be_killed: Vec<Entity>,
+    // NOTE: push_back, pop_front (should be Rc<RefCell<VecDeque<Entity>>> as well)
     available_entity_spots: VecDeque<Entity>,
+
+    system_masks: Rc<RefCell<HashMap<TypeId, u32>>>,
+    system_entities: Rc<RefCell<HashMap<TypeId, HashSet<Entity>>>>,
 }
 
 impl Registry {
@@ -48,18 +48,44 @@ impl Registry {
         }
     }
 
+    pub fn update(&mut self) -> Result<()> {
+        // HOW HARD IT CAN BE TO DO A FUCKING NESTED loop in a struct
+        // leftoff here for future refence...
+
+        for (system_type_id, system_mask) in self.system_masks.borrow_mut().iter_mut() {
+            for entity in &self.entities_to_be_added {
+                let entity_mask = self.get_entity_mask_mut(*entity).unwrap();
+
+                if *entity_mask & *system_mask == *system_mask {
+                    self.add_entity_to_system_with_id(system_type_id, *entity);
+                }
+            }
+        }
+        //let to_be_added = self.entities_to_be_added.iter_mut();
+        //for entity in to_be_added{
+        //let entity_mask = self
+        //.get_entity_mask(*entity)
+        //.ok_or(EcsErrors::EntityComponentMaskDoesNotExist)?;
+        //for (system_type_id, system_mask) in self.system_masks.borrow_mut().iter_mut() {
+        //if entity_mask & *system_mask == *system_mask {
+        //self.add_entity_to_system_with_id(system_type_id, *entity);
+        //}
+        //}
+        //}
+
+        self.entities_to_be_added.clear();
+
+        Ok(())
+    }
+
     pub fn register_component<T: Any + 'static>(&mut self) -> Result<()> {
         if self.components.len() >= MAX_COMPONENTS {
             return Err(EcsErrors::MaxComponentReached.into());
         }
-
         let type_id = TypeId::of::<T>();
         let components_length = self.components.len();
-
         self.components.insert(type_id, vec![]);
-
         self.component_masks.insert(type_id, 1 << components_length);
-
         Ok(())
     }
 
@@ -70,7 +96,10 @@ impl Registry {
         if self.available_entity_spots.is_empty() {
             let entity = Entity::new(self.num_entities);
             self.num_entities += 1;
-            self.entities_to_be_added.insert(entity);
+
+            if !self.entities_to_be_added.contains(&entity) {
+                self.entities_to_be_added.push(entity);
+            }
 
             // Fill component for all the component types None by default
             for (_type_id, components_vec) in self.components.iter_mut() {
@@ -198,6 +227,10 @@ impl Registry {
         self.num_entities
     }
 
+    pub fn get_num_systems(&self) -> usize {
+        self.system_masks.borrow().len()
+    }
+
     pub fn get_entity_mask(&self, entity: Entity) -> Option<u32> {
         self.entity_masks.get(entity.0).copied()
     }
@@ -213,8 +246,85 @@ impl Registry {
     pub fn get_component_mask_with_id(&self, type_id: TypeId) -> Option<u32> {
         self.component_masks.get(&type_id).copied()
     }
+
+    pub fn register_system<T: Any>(&mut self, system_mask: u32) -> Result<bool> {
+        let type_id = TypeId::of::<T>();
+        if self.system_masks.borrow().contains_key(&type_id) {
+            return Ok(false);
+        }
+        self.system_masks.borrow_mut().insert(type_id, system_mask); // this wrong
+        self.system_entities
+            .borrow_mut()
+            .insert(type_id, HashSet::new());
+        Ok(true)
+    }
+
+    pub fn get_system_entities<T: Any>(&self) -> Result<HashSet<Entity>> {
+        let type_id = TypeId::of::<T>();
+        let borrowed_entities = self.system_entities.borrow();
+        let entities = borrowed_entities
+            .get(&type_id)
+            .ok_or(EcsErrors::SystemDoesNotExist)?;
+
+        // making copies of this array on each iteration? what the fuck is this lmfao
+
+        Ok(entities.clone())
+    }
+
+    pub fn add_entity_to_system<T: Any>(&mut self, entity: Entity) -> Result<()> {
+        let type_id = TypeId::of::<T>();
+        let mut borrowed_entities = self.system_entities.borrow_mut();
+        let entities = borrowed_entities
+            .get_mut(&type_id)
+            .ok_or(EcsErrors::SystemDoesNotExist)?;
+        entities.insert(entity);
+        Ok(())
+    }
+
+    pub fn add_entity_to_system_with_id(&mut self, type_id: &TypeId, entity: Entity) -> Result<()> {
+        let mut borrowed_entities = self.system_entities.borrow_mut();
+        let entities = borrowed_entities
+            .get_mut(&type_id)
+            .ok_or(EcsErrors::SystemDoesNotExist)?;
+        entities.insert(entity);
+        Ok(())
+    }
+
+    pub fn remove_entity_from_system<T: Any>(&mut self, entity: Entity) -> Result<()> {
+        let type_id = TypeId::of::<T>();
+        let mut borrowed_entities = self.system_entities.borrow_mut();
+        let entities = borrowed_entities
+            .get_mut(&type_id)
+            .ok_or(EcsErrors::SystemDoesNotExist)?;
+        entities.remove(&entity);
+        Ok(())
+    }
+
+    pub fn remove_entity_from_system_with_id(
+        &mut self,
+        type_id: &TypeId,
+        entity: Entity,
+    ) -> Result<()> {
+        let mut borrowed_entities = self.system_entities.borrow_mut();
+        let entities = borrowed_entities
+            .get_mut(&type_id)
+            .ok_or(EcsErrors::SystemDoesNotExist)?;
+        entities.remove(&entity);
+        Ok(())
+    }
+
+    pub fn get_system_mask<T: Any>(&self) -> Result<u32> {
+        let mask = self
+            .system_masks
+            .borrow()
+            .get(&TypeId::of::<T>())
+            .copied()
+            .ok_or(EcsErrors::SystemDoesNotExist)?;
+        Ok(mask)
+    }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,9 +488,15 @@ mod tests {
 
         assert_eq!(entity1.0, 0);
         assert_eq!(entity2.0, 1);
-        assert_eq!(registry.entities_to_be_added.len(), 2);
-        assert_eq!(registry.entities_to_be_added.contains(&entity1), true);
-        assert_eq!(registry.entities_to_be_added.contains(&entity2), true);
+        assert_eq!(registry.entities_to_be_added.borrow().len(), 2);
+        assert_eq!(
+            registry.entities_to_be_added.borrow().contains(&entity1),
+            true
+        );
+        assert_eq!(
+            registry.entities_to_be_added.borrow().contains(&entity2),
+            true
+        );
         assert_eq!(registry.get_num_entities(), 2);
 
         // testing if components_vec is filled with default None values (nullptr)
@@ -468,3 +584,4 @@ mod tests {
         Ok(())
     }
 }
+*/

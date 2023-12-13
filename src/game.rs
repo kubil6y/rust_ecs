@@ -1,15 +1,19 @@
+use crate::{
+    ecs::{
+        components::{RenderComponent, TransformComponent, VelocityComponent},
+        registry::Registry,
+        systems::{
+            movement_system::MovementSystem, render_system::RenderSystem, SystemMaskBuilder,
+        },
+    },
+    logger::Logger,
+};
+use anyhow::{Error, Result};
+use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::WindowCanvas, Sdl};
 use std::{
     cell::RefCell,
     rc::Rc,
-    time::{Duration, SystemTime}, borrow::BorrowMut,
-};
-
-use anyhow::{Error, Result};
-use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect, render::WindowCanvas, Sdl};
-
-use crate::{
-    ecs::entity::Registry,
-    logger::{LogLevel, Logger},
+    time::{Duration, SystemTime},
 };
 
 // TODO: map_width and height static mut is unsafe
@@ -71,24 +75,38 @@ impl Game {
         self.logger
             .as_ref()
             .borrow_mut()
-            .set_log_level(LogLevel::Debug);
-
-        self.prev_frame_time = SystemTime::now();
-        self.load_level(1);
-        self.is_running = true;
-
-        self.logger
-            .as_ref()
-            .borrow_mut()
             .log("Game setup is called");
+        self.load_level(1)?;
+        self.prev_frame_time = SystemTime::now();
+        self.is_running = true;
         Ok(())
     }
 
-    pub fn load_level(&mut self, level: i32) {
+    pub fn load_level(&mut self, level: i32) -> Result<()> {
+        self.registry.register_component::<TransformComponent>()?;
+        self.registry.register_component::<RenderComponent>()?;
+        self.registry.register_component::<VelocityComponent>()?;
+
+        self.registry.register_system::<MovementSystem>(
+            SystemMaskBuilder::new(&self.registry)
+                .with::<TransformComponent>()?
+                .with::<VelocityComponent>()?
+                .build(),
+        )?;
+
+        self.registry.register_system::<RenderSystem>(
+            SystemMaskBuilder::new(&self.registry)
+                .with::<TransformComponent>()?
+                .with::<RenderComponent>()?
+                .build(),
+        )?;
+
         self.logger
             .as_ref()
             .borrow_mut()
             .log(&format!("Game Level {} is loaded", level));
+
+        Ok(())
     }
 
     pub fn process_input(&mut self) -> Result<()> {
@@ -130,16 +148,18 @@ impl Game {
         }
 
         // delta time is in seconds
-        let _dt = (SystemTime::now()
+        let dt = (SystemTime::now()
             .duration_since(self.prev_frame_time)?
             .as_millis()) as f64
             / 1000.0;
 
         self.prev_frame_time = SystemTime::now();
 
-        // TODO
-        // register systems
-        // process register entities for adding and deleting
+        // TODO: check this out
+        MovementSystem::update(&mut self.registry, dt)?;
+
+        // Process adding/killing entities to the system by their mask
+        self.registry.update();
 
         Ok(())
     }
@@ -149,7 +169,9 @@ impl Game {
         self.canvas.clear();
 
         self.canvas.set_draw_color(Color::RGB(255, 30, 30));
-        self.canvas
+
+        self
+            .canvas
             .fill_rect(Rect::new(10, 10, 20, 20))
             .map_err(Error::msg)?;
 
